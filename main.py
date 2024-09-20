@@ -10,18 +10,19 @@ import subprocess
 import time
 import csv
 import json
+from requests.exceptions import JSONDecodeError
 
-from pydriller import Repository
+# from pydriller import Repository
 
 SONAR_URL = ""
 SONAR_LOGIN = ""
 SONAR_PASSWORD = ""
-COMMITS_REPORT_FILE = "commits_report.csv"
+COMMITS_REPORT_FILE = "../../commits_report.csv"
 
 
 # import the csv with code samples to be used as dataframe
 samples_df = pd.read_csv(
-    "samples.csv",
+    "samplesTest.csv",
     delimiter=";",
     header=None,
     names=["sample_name", "github_address"],
@@ -112,6 +113,7 @@ def checkout_commit(commit):
 
 # create the sonar-scanner configuration file
 def create_sonar_scanner_config(sample_name, token):
+    print(f"Creating sonar-scanner configuration file for {sample_name}")
     with open("sonar-project.properties", "w") as f:
         f.write(
             f"sonar.projectKey={sample_name}\nsonar.sources=.\nsonar.host.url={SONAR_URL}\nsonar.token={token}"
@@ -128,34 +130,80 @@ def run_sonar_scanner(commit_hash, commit_date, project_key, token):
     )
 
 
-def get_issues_detected(project_key, token):
-    headers = {"Authorization": f"Bearer {token}"}
-    response = requests.get(
-        f"{SONAR_URL}/api/issues/search?components={project_key}&s=FILE_LINE&"
-        "issueStatuses=ACCEPTED,CONFIRMED,FALSE_POSITIVE,FIXED,OPEN&ps=100&"
-        "facets=cleanCodeAttributeCategories,impactSoftwareQualities,codeVariants&"
-        "additionalFields=_all&timeZone=America/Sao_Paulo",
-        headers=headers,
-    )
+# def get_issues_detected(project_key, token):
+#     headers = {"Authorization": f"Bearer {token}"}
+#     response = requests.get(
+#         f"{SONAR_URL}/api/issues/search?components={project_key}&s=FILE_LINE&"
+#         "issueStatuses=ACCEPTED,CONFIRMED,FALSE_POSITIVE,FIXED,OPEN&ps=100&"
+#         "facets=cleanCodeAttributeCategories,impactSoftwareQualities,codeVariants&"
+#         "additionalFields=_all&timeZone=America/Sao_Paulo",
+#         headers=headers,
+#     )
 
-    issues = response.json().get("issues", [])
-    print(issues)
-    return json.dumps(issues)
+#     issues = response.json().get("issues", [])
+#     print(issues)
+#     return json.dumps(issues)
+
+
+def get_issues_detected(project_key, token):
+    print(f"Getting issues for project {project_key} - {token}")
+    url = f"{SONAR_URL}/api/issues/search?components={project_key}&s=FILE_LINE&issueStatuses=ACCEPTED,CONFIRMED,FALSE_POSITIVE,FIXED,OPEN&ps=100&facets=cleanCodeAttributeCategories,impactSoftwareQualities,codeVariants&additionalFields=_all&timeZone=America/Sao_Paulo"
+    headers = {"Authorization": f"Bearer {token}"}
+    try:
+        response = requests.get(url, headers=headers)
+        response.raise_for_status()
+        issues = response.json()
+        return issues
+    except JSONDecodeError as e:
+        print(f"Erro ao decodificar a resposta JSON: {e}")
+        return None
+    except requests.RequestException as e:
+        print(f"Erro na requisição HTTP: {e}")
+        return None
 
 
 def generate_sonarqube_token(project_key):
     print(f"Generating token for project {project_key}")
 
-    url = f"{SONAR_URL}/api/user_tokens/generate"
-    data = {"name": f"token_{project_key}", "login": SONAR_LOGIN}
-    response = requests.post(url, data=data, auth=(SONAR_LOGIN, SONAR_PASSWORD))
+    token_name = f"token_{project_key}"
 
-    if response.status_code == 200:
-        token = response.json().get("token")
-        print(f"Token generated: {token}")
-        return token
+    url_list = f"{SONAR_URL}/api/user_tokens/search"
+    response_list = requests.get(url_list, auth=(SONAR_LOGIN, SONAR_PASSWORD))
+
+    if response_list.status_code == 200:
+        existing_tokens = response_list.json().get("userTokens", [])
+
+        for token in existing_tokens:
+            if token["name"] == token_name:
+                print(f"Token '{token_name}' já existe. Excluindo o token antigo...")
+
+                url_revoke = f"{SONAR_URL}/api/user_tokens/revoke"
+                data_revoke = {"name": token_name}
+                response_revoke = requests.post(
+                    url_revoke, data=data_revoke, auth=(SONAR_LOGIN, SONAR_PASSWORD)
+                )
+
+                if response_revoke.status_code == 204:
+                    print(f"Token '{token_name}' excluído com sucesso.")
+                else:
+                    print(f"Falha ao excluir o token: {response_revoke.text}")
+                    return None
+
+        url_generate = f"{SONAR_URL}/api/user_tokens/generate"
+        data = {"name": token_name, "login": SONAR_LOGIN}
+        response_generate = requests.post(
+            url_generate, data=data, auth=(SONAR_LOGIN, SONAR_PASSWORD)
+        )
+
+        if response_generate.status_code == 200:
+            token = response_generate.json().get("token")
+            print(f"Token generated: {token}")
+            return token
+        else:
+            print(f"Failed to generate token: {response_generate.text}")
+            return None
     else:
-        print(f"Failed to generate token: {response.text}")
+        print(f"Failed to retrieve existing tokens: {response_list.text}")
         return None
 
 
@@ -307,11 +355,14 @@ def is_dotnet_project(project_path):
 
 
 def analyze_commits(sample_name, token):
+    print(f"Analyzing commits for {sample_name}")
+
     commits = run_shell_command("git rev-list --all --reverse").splitlines()
+    print("Number of commits:", len(commits))
 
     with open(COMMITS_REPORT_FILE, mode="w", newline="") as file:
         writer = csv.writer(file)
-        writer.writerow(["Sample", "Commit Hash", "Date", "Issues"])
+        writer.writerow(["Sample", "Commit Hash", "Date", "Analysis Date", "Issues"])
 
         for commit_hash in commits:
             print(f"Analyzing commit {commit_hash}...")
@@ -325,12 +376,15 @@ def analyze_commits(sample_name, token):
             print("Aguardando SonarQube processar a análise...")
             time.sleep(15)
 
-            issues_detected = get_issues_detected()
+            issues_detected = get_issues_detected(sample_name, token)
+            current_date = time.strftime("%Y-%m-%d %H:%M:%S")
 
             # print([sample_name, commit_hash, commit_date, issues_detected])
             # print(issues_detected)
 
-            writer.writerow([sample_name, commit_hash, commit_date, issues_detected])
+            writer.writerow(
+                [sample_name, commit_hash, commit_date, current_date, issues_detected]
+            )
 
     main_branch = get_main_branch()
 
