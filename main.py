@@ -14,9 +14,9 @@ from requests.exceptions import JSONDecodeError
 
 # from pydriller import Repository
 
-SONAR_URL = ""
-SONAR_LOGIN = ""
-SONAR_PASSWORD = ""
+SONAR_URL = "http://172.23.160.1:9000"
+SONAR_LOGIN = "admin"
+SONAR_PASSWORD = "sonarsenha"
 COMMITS_REPORT_FILE = "../../commits_report.csv"
 
 
@@ -134,7 +134,7 @@ def run_sonar_scanner(commit_hash, commit_date, project_key, token):
 #     headers = {"Authorization": f"Bearer {token}"}
 #     response = requests.get(
 #         f"{SONAR_URL}/api/issues/search?components={project_key}&s=FILE_LINE&"
-#         "issueStatuses=ACCEPTED,CONFIRMED,FALSE_POSITIVE,FIXED,OPEN&ps=100&"
+#         "issueStatuses=ACCEPTED,CONFIRMED,FALSE_POSITIVE,FIXED,OPEN&ps=500&"
 #         "facets=cleanCodeAttributeCategories,impactSoftwareQualities,codeVariants&"
 #         "additionalFields=_all&timeZone=America/Sao_Paulo",
 #         headers=headers,
@@ -147,7 +147,7 @@ def run_sonar_scanner(commit_hash, commit_date, project_key, token):
 
 def get_issues_detected(project_key, token):
     print(f"Getting issues for project {project_key} - {token}")
-    url = f"{SONAR_URL}/api/issues/search?components={project_key}&s=FILE_LINE&issueStatuses=ACCEPTED,CONFIRMED,FALSE_POSITIVE,FIXED,OPEN&ps=100&facets=cleanCodeAttributeCategories,impactSoftwareQualities,codeVariants&additionalFields=_all&timeZone=America/Sao_Paulo"
+    url = f"{SONAR_URL}/api/issues/search?components={project_key}&s=FILE_LINE&issueStatuses=ACCEPTED,CONFIRMED,FALSE_POSITIVE,FIXED,OPEN&ps=500&facets=cleanCodeAttributeCategories,impactSoftwareQualities,codeVariants&additionalFields=_all&timeZone=America/Sao_Paulo"
     headers = {"Authorization": f"Bearer {token}"}
     try:
         response = requests.get(url, headers=headers)
