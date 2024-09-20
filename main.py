@@ -25,8 +25,9 @@ samples_df = pd.read_csv(
 # Print the columns of the DataFrame to debug
 print(samples_df.columns)
 
-# Define the absolute path to the samples folder at ~/Mestrado/samples
-samples_folder = os.path.join(os.path.expanduser("~"), "Mestrado", "samples")
+script_dir = os.path.dirname(os.path.abspath(__file__))
+samples_folder = os.path.join(script_dir, "samples")
+
 data_folder_path = os.path.join(
     os.path.expanduser("~"),
     "Documents",
