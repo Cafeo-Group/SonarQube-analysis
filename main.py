@@ -66,6 +66,26 @@ def get_commit_date(commit_hash):
     return run_shell_command(f"git show -s --format=%ci {commit_hash} | cut -d' ' -f1")
 
 
+def get_main_branch():
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+
+        if result.returncode == 0:
+            main_branch = result.stdout.strip()
+            return main_branch
+        else:
+            print("Erro ao tentar obter a branch principal:", result.stderr)
+            return None
+    except Exception as e:
+        print(f"Erro: {e}")
+        return None
+
+
 # create the helper function to create the Sonarqube project with the sample name with login credentials with optional parameters
 def create_sonarqube_project(sample_name):
     print(f"Creating SonarQube project for {sample_name}")
@@ -314,7 +334,9 @@ def analyze_commits(sample_name):
 
             writer.writerow([sample_name, commit_hash, commit_date, issues_detected])
 
-    run_shell_command("git checkout main")
+    main_branch = get_main_branch()
+
+    run_shell_command(f"git checkout {main_branch}")
 
 
 # create the function to run the Git part (create SonarQube project, clone, checkout, run sonar-scanner, delete repository)
