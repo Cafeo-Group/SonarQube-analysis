@@ -120,7 +120,23 @@ def get_issues_detected(project_key, token):
 
     issues = response.json().get("issues", [])
     print(issues)
-    return json.dumps(issues)  # Convertendo para string JSON
+    return json.dumps(issues)
+
+
+def generate_sonarqube_token(project_key):
+    print(f"Generating token for project {project_key}")
+
+    url = f"{SONAR_URL}/api/user_tokens/generate"
+    data = {"name": f"token_{project_key}", "login": SONAR_LOGIN}
+    response = requests.post(url, data=data, auth=(SONAR_LOGIN, SONAR_PASSWORD))
+
+    if response.status_code == 200:
+        token = response.json().get("token")
+        print(f"Token generated: {token}")
+        return token
+    else:
+        print(f"Failed to generate token: {response.text}")
+        return None
 
 
 # Create a runner for sonnar-scanner in dotnet
@@ -273,6 +289,8 @@ def is_dotnet_project(project_path):
 def analyze_commits(sample_name):
     commits = run_shell_command("git rev-list --all --reverse").splitlines()
 
+    token = generate_sonarqube_token(sample_name)
+
     with open(COMMITS_REPORT_FILE, mode="w", newline="") as file:
         writer = csv.writer(file)
         writer.writerow(["Sample", "Commit Hash", "Date", "Issues"])
@@ -284,7 +302,7 @@ def analyze_commits(sample_name):
 
             commit_date = get_commit_date(commit_hash)
 
-            run_sonar_scanner(commit_hash, commit_date)
+            run_sonar_scanner(commit_hash, commit_date, sample_name, token)
 
             print("Aguardando SonarQube processar a análise...")
             time.sleep(15)
