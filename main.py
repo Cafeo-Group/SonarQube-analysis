@@ -7,12 +7,17 @@ import pandas as pd
 import requests
 import os
 import subprocess
+import time
+import csv
+import json
 
 from pydriller import Repository
 
 SONAR_URL = ""
 SONAR_LOGIN = ""
 SONAR_PASSWORD = ""
+COMMITS_REPORT_FILE = "commits_report.csv"
+
 
 # import the csv with code samples to be used as dataframe
 samples_df = pd.read_csv(
@@ -48,6 +53,19 @@ def get_sample():
         yield row["sample_name"], row["github_address"]
 
 
+def run_shell_command(command):
+    result = subprocess.run(command, shell=True, capture_output=True, text=True)
+    return result.stdout.strip()
+
+
+def git_checkout(commit_hash):
+    run_shell_command(f"git checkout {commit_hash}")
+
+
+def get_commit_date(commit_hash):
+    return run_shell_command(f"git show -s --format=%ci {commit_hash} | cut -d' ' -f1")
+
+
 # create the helper function to create the Sonarqube project with the sample name with login credentials with optional parameters
 def create_sonarqube_project(sample_name):
     print(f"Creating SonarQube project for {sample_name}")
@@ -80,9 +98,29 @@ def create_sonar_scanner_config(sample_name, commit_hash):
         )
 
 
-# create the helper function to run the sonar-scanner
-def run_sonar_scanner():
-    os.system("sonar-scanner")
+def run_sonar_scanner(commit_hash, commit_date, project_key, token):
+    run_shell_command(
+        f"sonar-scanner -Dsonar.projectKey={project_key} "
+        f"-Dsonar.sources=. -Dsonar.host.url={SONAR_URL} "
+        f"-Dsonar.token={token} "
+        f"-Dsonar.projectVersion={commit_hash} "
+        f"-Dsonar.projectDate={commit_date}"
+    )
+
+
+def get_issues_detected(project_key, token):
+    headers = {"Authorization": f"Bearer {token}"}
+    response = requests.get(
+        f"{SONAR_URL}/api/issues/search?components={project_key}&s=FILE_LINE&"
+        "issueStatuses=ACCEPTED,CONFIRMED,FALSE_POSITIVE,FIXED,OPEN&ps=100&"
+        "facets=cleanCodeAttributeCategories,impactSoftwareQualities,codeVariants&"
+        "additionalFields=_all&timeZone=America/Sao_Paulo",
+        headers=headers,
+    )
+
+    issues = response.json().get("issues", [])
+    print(issues)
+    return json.dumps(issues)  # Convertendo para string JSON
 
 
 # Create a runner for sonnar-scanner in dotnet
@@ -230,6 +268,35 @@ def is_dotnet_project(project_path):
     return any(glob.glob(os.path.join(project_path, "*.csproj"))) or any(
         glob.glob(os.path.join(project_path, "*.sln"))
     )
+
+
+def analyze_commits(sample_name):
+    commits = run_shell_command("git rev-list --all --reverse").splitlines()
+
+    with open(COMMITS_REPORT_FILE, mode="w", newline="") as file:
+        writer = csv.writer(file)
+        writer.writerow(["Sample", "Commit Hash", "Date", "Issues"])
+
+        for commit_hash in commits:
+            print(f"Analyzing commit {commit_hash}...")
+
+            git_checkout(commit_hash)
+
+            commit_date = get_commit_date(commit_hash)
+
+            run_sonar_scanner(commit_hash, commit_date)
+
+            print("Aguardando SonarQube processar a análise...")
+            time.sleep(15)
+
+            issues_detected = get_issues_detected()
+
+            # print([sample_name, commit_hash, commit_date, issues_detected])
+            # print(issues_detected)
+
+            writer.writerow([sample_name, commit_hash, commit_date, issues_detected])
+
+    run_shell_command("git checkout main")
 
 
 # create the function to run the Git part (create SonarQube project, clone, checkout, run sonar-scanner, delete repository)
