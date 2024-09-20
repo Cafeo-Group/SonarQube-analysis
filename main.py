@@ -111,10 +111,10 @@ def checkout_commit(commit):
 
 
 # create the sonar-scanner configuration file
-def create_sonar_scanner_config(sample_name, commit_hash):
+def create_sonar_scanner_config(sample_name, token):
     with open("sonar-project.properties", "w") as f:
         f.write(
-            f"sonar.projectKey={sample_name}\nsonar.sources=.\nsonar.host.url=http://localhost:9000\nsonar.token=sqa_8b5b36d0d8f38e528b7e7535a2708229f50fbc21\nsonar.projectVersion={commit_hash}"
+            f"sonar.projectKey={sample_name}\nsonar.sources=.\nsonar.host.url={SONAR_URL}\nsonar.token={token}"
         )
 
 
@@ -306,10 +306,8 @@ def is_dotnet_project(project_path):
     )
 
 
-def analyze_commits(sample_name):
+def analyze_commits(sample_name, token):
     commits = run_shell_command("git rev-list --all --reverse").splitlines()
-
-    token = generate_sonarqube_token(sample_name)
 
     with open(COMMITS_REPORT_FILE, mode="w", newline="") as file:
         writer = csv.writer(file)
@@ -339,39 +337,17 @@ def analyze_commits(sample_name):
     run_shell_command(f"git checkout {main_branch}")
 
 
-# create the function to run the Git part (create SonarQube project, clone, checkout, run sonar-scanner, delete repository)
 def run_git_part(row):
     sample_name, github_address = row["sample_name"], row["github_address"]
     create_sonarqube_project(sample_name)
+    token = generate_sonarqube_token(sample_name)
     print(f"Running SonarQube git clone for {sample_name}")
     clone_repository(github_address)
     repository_name = github_address.split("/")[-1].replace(".git", "")
-    # os.chdir(f'{samples_folder}/{repository_name}')
-    current_path = f"{samples_folder}/{repository_name}"
+    os.chdir(f"{samples_folder}/{repository_name}")
+    create_sonar_scanner_config(sample_name, token)
 
-    # run for all commits in the repository
-    commits_to_checkout = tuple(Repository(current_path).traverse_commits())
-    latest_commit = commits_to_checkout[-1]
-    print(f"Latest commit: {latest_commit.hash}")
-    print(f"Number of commits: {len(commits_to_checkout)}")
-    hashes = [commit.hash for commit in commits_to_checkout]
-    print(f"Commits: {hashes}")
-
-    for commit in commits_to_checkout:
-        os.chdir(f"{samples_folder}/{repository_name}")
-        checkout_commit(commit.hash)
-        is_latest_commit = commit.hash == latest_commit
-        print(f"Running SonarQube for commit: {commit.hash}")
-        # Identify if the commit has a dotnet project to be built
-        if is_dotnet_project(current_path):
-            print("Running SonarQube for dotnet project")
-            run_sonar_scanner_dotnet(sample_name, commit.hash, is_latest_commit)
-        else:
-            print("Running SonarQube for non-dotnet project")
-            create_sonar_scanner_config(sample_name, commit.hash)
-            run_sonar_scanner()
-        os.system("git reset --hard")
-        os.system("git clean -fd")
+    analyze_commits(sample_name, token)
 
     os.chdir(samples_folder)
     print(f"Deleting repository directory: {samples_folder}/{repository_name}")
