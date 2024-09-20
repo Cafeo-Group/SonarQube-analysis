@@ -10,10 +10,13 @@ import subprocess
 
 from pydriller import Repository
 
-# import the csv with code samples to be used as dataframe
+SONAR_URL = ""
+SONAR_LOGIN = ""
+SONAR_PASSWORD = ""
 
+# import the csv with code samples to be used as dataframe
 samples_df = pd.read_csv(
-    "samples-dotnet.csv",
+    "samples.csv",
     delimiter=";",
     header=None,
     names=["sample_name", "github_address"],
@@ -45,12 +48,12 @@ def get_sample():
 
 
 # create the helper function to create the Sonarqube project with the sample name with login credentials with optional parameters
-def create_sonarqube_project(sample_name, lang=None):
-    print(f"Creating SonarQube project for {sample_name} language: {lang}")
+def create_sonarqube_project(sample_name):
+    print(f"Creating SonarQube project for {sample_name}")
 
-    url = "http://localhost:9000/api/projects/create"
-    data = {"name": f"{lang}---{sample_name}", "project": f"{sample_name}"}
-    response = requests.post(url, data=data, auth=("admin", "root"))
+    url = f"{SONAR_URL}/api/projects/create"
+    data = {"name": f"{sample_name}", "project": f"{sample_name}"}
+    response = requests.post(url, data=data, auth=(SONAR_LOGIN, SONAR_PASSWORD))
     print(response.text)
     return response
 
@@ -231,7 +234,7 @@ def is_dotnet_project(project_path):
 # create the function to run the Git part (create SonarQube project, clone, checkout, run sonar-scanner, delete repository)
 def run_git_part(row):
     sample_name, github_address = row["sample_name"], row["github_address"]
-    create_sonarqube_project(sample_name, lang="C#")
+    create_sonarqube_project(sample_name)
     print(f"Running SonarQube git clone for {sample_name}")
     clone_repository(github_address)
     repository_name = github_address.split("/")[-1].replace(".git", "")
