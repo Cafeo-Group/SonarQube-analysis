@@ -12,7 +12,6 @@ import csv
 import json
 from requests.exceptions import JSONDecodeError
 
-# from pydriller import Repository
 
 SONAR_URL = ""
 SONAR_LOGIN = ""
@@ -20,7 +19,6 @@ SONAR_PASSWORD = ""
 COMMITS_REPORT_FILE = "../../commits_report.csv"
 
 
-# import the csv with code samples to be used as dataframe
 samples_df = pd.read_csv(
     "samples.csv",
     delimiter=";",
@@ -28,7 +26,6 @@ samples_df = pd.read_csv(
     names=["sample_name", "github_address"],
 )
 
-# Print the columns of the DataFrame to debug
 print(samples_df.columns)
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -44,10 +41,6 @@ data_folder_path = os.path.join(
     "data",
 )
 
-# set the path to the csv file
-
-# create the helper function to read the csv file and return sample name and github address
-
 
 def get_sample():
     for index, row in samples_df.iterrows():
@@ -57,11 +50,6 @@ def get_sample():
 def run_shell_command(command):
     result = subprocess.run(command, shell=True, capture_output=True, text=True)
     return result.stdout.strip()
-
-
-# def git_checkout(commit_hash):
-#     print(f"Checkout to {commit_hash}")
-#     run_shell_command(f"git checkout {commit_hash}")
 
 
 def get_commit_date(commit_hash):
@@ -88,7 +76,6 @@ def get_main_branch():
         return None
 
 
-# create the helper function to create the Sonarqube project with the sample name with login credentials with optional parameters
 def create_sonarqube_project(sample_name):
     print(f"Creating SonarQube project for {sample_name}")
 
@@ -99,17 +86,10 @@ def create_sonarqube_project(sample_name):
     return response
 
 
-# create the helper function to clone the GitHub repository and cd to the repository
 def clone_repository(github_address):
-    # os.makedirs("samples", exist_ok=True)
     os.system(
         f'git clone {github_address} {samples_folder}/{github_address.split("/")[-1].replace(".git", "")}'
     )
-
-
-# create the helper function to checkout to specific commit
-# def checkout_commit(commit):
-#     os.system(f"git checkout  {commit}")
 
 
 def git_checkout(commit_hash):
@@ -121,7 +101,6 @@ def git_checkout(commit_hash):
     return True
 
 
-# create the sonar-scanner configuration file
 def create_sonar_scanner_config(sample_name, token):
     print(f"Creating sonar-scanner configuration file for {sample_name}")
     with open("sonar-project.properties", "w") as f:
@@ -142,21 +121,6 @@ def run_sonar_scanner(commit_hash, commit_date, project_key, token):
     if "error" in result.lower():
         print(f"Erro ao executar o sonar-scanner para o commit {commit_hash}")
         print(result)
-
-
-# def get_issues_detected(project_key, token):
-#     headers = {"Authorization": f"Bearer {token}"}
-#     response = requests.get(
-#         f"{SONAR_URL}/api/issues/search?components={project_key}&s=FILE_LINE&"
-#         "issueStatuses=ACCEPTED,CONFIRMED,FALSE_POSITIVE,FIXED,OPEN&ps=500&"
-#         "facets=cleanCodeAttributeCategories,impactSoftwareQualities,codeVariants&"
-#         "additionalFields=_all&timeZone=America/Sao_Paulo",
-#         headers=headers,
-#     )
-
-#     issues = response.json().get("issues", [])
-#     print(issues)
-#     return json.dumps(issues)
 
 
 def get_issues_detected(project_key, token):
@@ -221,7 +185,6 @@ def generate_sonarqube_token(project_key):
         return None
 
 
-# Create a runner for sonnar-scanner in dotnet
 def run_sonar_scanner_dotnet(sample_name, commit_hash, is_latest_commit=False):
     subprocess.run(
         f'dotnet-sonarscanner begin /k:"{sample_name}" /d:sonar.host.url="http://localhost:9000" /d:sonar.login="sqa_8b5b36d0d8f38e528b7e7535a2708229f50fbc21" /v:"{commit_hash}"',
@@ -251,14 +214,11 @@ def run_sonar_scanner_dotnet(sample_name, commit_hash, is_latest_commit=False):
     )
 
 
-# create the helper function to delete the repository from local machine
 def delete_repository(repository_name):
     os.system(f"rm -rf {repository_name}")
 
 
-# create the helper function to extract all the issues from the Sonarqube instance based on the page
 def extract_issues(sample_name):
-    # Ensure that the directory exists
     os.makedirs("data/issues", exist_ok=True)
 
     url = f"http://localhost:9000/api/issues/search?componentKeys={sample_name}&ps=500"
@@ -306,26 +266,16 @@ def extract_issues(sample_name):
             else:
                 print(f"Total issues for {quality} is greater than 10000")
 
-    # issues_df.to_csv(f'data/issues/{sample_name}_issues.csv')
 
-    # return issues_df
-
-
-# create the helper function to extract the code snippets based on the issues from the Sonarqube project to a csv file to a csv file
 def extract_code_snippets(issue_key, sample_name):
-    # Ensure that the directory exists
     os.makedirs("data/code_snippets", exist_ok=True)
 
     url = f"http://localhost:9000/api/sources/issue_snippets?issueKey={issue_key}"
     response = requests.get(url, auth=("admin", "root"))
 
-    # print(snippets)
-
-    # Create a regex to find if the key contains the sample_name variable
     regex = f"{sample_name}"
     snippets = response.json().get(regex, [])
 
-    # if snippets is empty, return
     if not snippets:
         return
 
@@ -334,20 +284,15 @@ def extract_code_snippets(issue_key, sample_name):
     component_project = snippets["component"]["project"]
     print(f"Component key: {component_key}")
 
-    # Create a DataFrame to store the sources
     sources_df = pd.DataFrame(sources)
 
-    # Add the component key to each row of the dataframe
     sources_df["component_key"] = component_key
 
-    # Add the component project to each row of the dataframe
     sources_df["component_project"] = component_project
 
-    # Save the sources to a csv file
     sources_df.to_csv(f"data/code_snippets/{issue_key}_code_snippets.csv")
 
 
-# Create the parallel version of the above function
 def extract_code_snippets_parallel(row):
     issue_k = row.key
     sample = row.component
@@ -355,13 +300,11 @@ def extract_code_snippets_parallel(row):
     extract_code_snippets(issue_k, sample)
 
 
-# Function to divide the dataframe into chunks
 def divide_chunks(df, n):
     for i in range(0, len(df), n):
         yield df[i : i + n]
 
 
-# Create a helper function to identify if is a dotnet projext
 def is_dotnet_project(project_path):
     return any(glob.glob(os.path.join(project_path, "*.csproj"))) or any(
         glob.glob(os.path.join(project_path, "*.sln"))
@@ -407,15 +350,11 @@ def analyze_commits(sample_name, token):
 
                 run_sonar_scanner(commit_hash, commit_date, sample_name, token)
 
-                # wait_for_sonar_completion(sample_name, token)
                 print("Waiting for SonarQube to process analysis...")
                 time.sleep(15)
 
                 issues_detected = get_issues_detected(sample_name, token)
                 current_date = time.strftime("%Y-%m-%d %H:%M:%S")
-
-                # print([sample_name, commit_hash, commit_date, issues_detected])
-                # print(issues_detected)
 
                 writer.writerow(
                     [
@@ -452,14 +391,12 @@ def run_git_part(row):
     delete_repository(f"{samples_folder}/{repository_name}")
 
 
-# create then function to run the SonarQube part (extract issues, extract code snippets)
 def run_sonarqube_issues_part():
     for index, row in samples_df.iterrows():
         sample_name = row["sample_name"]
         print(f"Extracting issues for {sample_name}")
         extract_issues(sample_name)
 
-    # Merge all the issues into one csv file
     issues_list = []
     for file_path in glob.glob("data/issues/*_issues.csv"):
         if os.path.exists(file_path):
@@ -476,27 +413,14 @@ def run_sonarqube_issues_part():
 
 
 def run_sonarqube_snippets_part():
-    # define the issues in each df for each file in data/issues/all_issues.csv
 
     issues_df = pd.read_csv("data/issues/0all_nondup.csv")
-    # for index, row in issues_df.iterrows():
-    #     issue_key = row['key']
-    #     sample_name = row['component']
-    #     print(f'Extracting code snippets for {issue_key}')
-    #     extract_code_snippets(issue_key, sample_name)
 
     num_threads = 124
     print(f"Number of threads: {num_threads}")
 
-    # processed_keys = set()
     #
-    # with ThreadPoolExecutor(max_workers=num_threads) as executor:
-    #     for row in issues_df.itertuples(index=False):
-    #         if row.key not in processed_keys:
-    #             executor.submit(extract_code_snippets_parallel, row)
-    #             processed_keys.add(row.key)
 
-    # Merge all the code snippets into one csv file
     print("Merging all code snippets into one csv file")
     snippets_list = []
 
@@ -519,16 +443,12 @@ def run_sonarqube_snippets_part():
         print("No code snippets to merge.")
 
 
-# create the main function to run the Git part and SonarQube part
 def main():
     print("start at", time.strftime("%Y-%m-%d %H:%M:%S"))
-    # Get the number of CPU cores available
     num_cores = os.cpu_count()
     print(f"Number of cores: {num_cores}")
     with Pool(processes=num_cores) as pool:
         pool.map(run_git_part, [row for _, row in samples_df.iterrows()])
-    # run_sonarqube_issues_part()
-    # run_sonarqube_snippets_part()
     print("end at", time.strftime("%Y-%m-%d %H:%M:%S"))
 
 
