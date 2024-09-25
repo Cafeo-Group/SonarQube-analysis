@@ -7,13 +7,22 @@ import pandas as pd
 import requests
 import os
 import subprocess
+import time
+import csv
+import json
+from requests.exceptions import JSONDecodeError
 
-from pydriller import Repository
+# from pydriller import Repository
+
+SONAR_URL = ""
+SONAR_LOGIN = ""
+SONAR_PASSWORD = ""
+COMMITS_REPORT_FILE = "../../commits_report.csv"
+
 
 # import the csv with code samples to be used as dataframe
-
 samples_df = pd.read_csv(
-    "samples-dotnet.csv",
+    "samples.csv",
     delimiter=";",
     header=None,
     names=["sample_name", "github_address"],
@@ -22,8 +31,9 @@ samples_df = pd.read_csv(
 # Print the columns of the DataFrame to debug
 print(samples_df.columns)
 
-# Define the absolute path to the samples folder at ~/Mestrado/samples
-samples_folder = os.path.join(os.path.expanduser("~"), "Mestrado", "samples")
+script_dir = os.path.dirname(os.path.abspath(__file__))
+samples_folder = os.path.join(script_dir, "samples")
+
 data_folder_path = os.path.join(
     os.path.expanduser("~"),
     "Documents",
@@ -44,41 +54,171 @@ def get_sample():
         yield row["sample_name"], row["github_address"]
 
 
-# create the helper function to create the Sonarqube project with the sample name with login credentials with optional parameters
-def create_sonarqube_project(sample_name, lang=None):
-    print(f"Creating SonarQube project for {sample_name} language: {lang}")
+def run_shell_command(command):
+    result = subprocess.run(command, shell=True, capture_output=True, text=True)
+    return result.stdout.strip()
 
-    url = "http://localhost:9000/api/projects/create"
-    data = {"name": f"{lang}---{sample_name}", "project": f"{sample_name}"}
-    response = requests.post(url, data=data, auth=("admin", "root"))
+
+# def git_checkout(commit_hash):
+#     print(f"Checkout to {commit_hash}")
+#     run_shell_command(f"git checkout {commit_hash}")
+
+
+def get_commit_date(commit_hash):
+    return run_shell_command(f"git show -s --format=%ci {commit_hash} | cut -d' ' -f1")
+
+
+def get_main_branch():
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+
+        if result.returncode == 0:
+            main_branch = result.stdout.strip()
+            return main_branch
+        else:
+            print("Erro ao tentar obter a branch principal:", result.stderr)
+            return None
+    except Exception as e:
+        print(f"Erro: {e}")
+        return None
+
+
+# create the helper function to create the Sonarqube project with the sample name with login credentials with optional parameters
+def create_sonarqube_project(sample_name):
+    print(f"Creating SonarQube project for {sample_name}")
+
+    url = f"{SONAR_URL}/api/projects/create"
+    data = {"name": f"{sample_name}", "project": f"{sample_name}"}
+    response = requests.post(url, data=data, auth=(SONAR_LOGIN, SONAR_PASSWORD))
     print(response.text)
     return response
 
 
 # create the helper function to clone the GitHub repository and cd to the repository
 def clone_repository(github_address):
-    os.makedirs("samples", exist_ok=True)
+    # os.makedirs("samples", exist_ok=True)
     os.system(
         f'git clone {github_address} {samples_folder}/{github_address.split("/")[-1].replace(".git", "")}'
     )
 
 
 # create the helper function to checkout to specific commit
-def checkout_commit(commit):
-    os.system(f"git checkout  {commit}")
+# def checkout_commit(commit):
+#     os.system(f"git checkout  {commit}")
+
+
+def git_checkout(commit_hash):
+    print(f"Checkout to {commit_hash}")
+    result = run_shell_command(f"git checkout {commit_hash}")
+    if "error" in result.lower():
+        print(f"Erro ao realizar checkout para o commit {commit_hash}")
+        return False
+    return True
 
 
 # create the sonar-scanner configuration file
-def create_sonar_scanner_config(sample_name, commit_hash):
+def create_sonar_scanner_config(sample_name, token):
+    print(f"Creating sonar-scanner configuration file for {sample_name}")
     with open("sonar-project.properties", "w") as f:
         f.write(
-            f"sonar.projectKey={sample_name}\nsonar.sources=.\nsonar.host.url=http://localhost:9000\nsonar.token=sqa_8b5b36d0d8f38e528b7e7535a2708229f50fbc21\nsonar.projectVersion={commit_hash}"
+            f"sonar.projectKey={sample_name}\nsonar.sources=.\nsonar.host.url={SONAR_URL}\nsonar.token={token}"
         )
 
 
-# create the helper function to run the sonar-scanner
-def run_sonar_scanner():
-    os.system("sonar-scanner")
+def run_sonar_scanner(commit_hash, commit_date, project_key, token):
+    result = run_shell_command(
+        f"sonar-scanner -Dsonar.projectKey={project_key} "
+        f"-Dsonar.sources=. -Dsonar.host.url={SONAR_URL} "
+        f"-Dsonar.token={token} "
+        f"-Dsonar.projectVersion={commit_hash} "
+        f"-Dsonar.projectDate={commit_date}"
+    )
+
+    if "error" in result.lower():
+        print(f"Erro ao executar o sonar-scanner para o commit {commit_hash}")
+        print(result)
+
+
+# def get_issues_detected(project_key, token):
+#     headers = {"Authorization": f"Bearer {token}"}
+#     response = requests.get(
+#         f"{SONAR_URL}/api/issues/search?components={project_key}&s=FILE_LINE&"
+#         "issueStatuses=ACCEPTED,CONFIRMED,FALSE_POSITIVE,FIXED,OPEN&ps=500&"
+#         "facets=cleanCodeAttributeCategories,impactSoftwareQualities,codeVariants&"
+#         "additionalFields=_all&timeZone=America/Sao_Paulo",
+#         headers=headers,
+#     )
+
+#     issues = response.json().get("issues", [])
+#     print(issues)
+#     return json.dumps(issues)
+
+
+def get_issues_detected(project_key, token):
+    print(f"Getting issues for project {project_key} - {token}")
+    url = f"{SONAR_URL}/api/issues/search?components={project_key}&s=FILE_LINE&issueStatuses=ACCEPTED,CONFIRMED,FALSE_POSITIVE,FIXED,OPEN&ps=500&facets=cleanCodeAttributeCategories,impactSoftwareQualities,codeVariants&additionalFields=_all&timeZone=America/Sao_Paulo"
+    headers = {"Authorization": f"Bearer {token}"}
+    try:
+        response = requests.get(url, headers=headers)
+        response.raise_for_status()
+        issues = response.json()
+        return issues
+    except JSONDecodeError as e:
+        print(f"Erro ao decodificar a resposta JSON: {e}")
+        return None
+    except requests.RequestException as e:
+        print(f"Erro na requisição HTTP: {e}")
+        return None
+
+
+def generate_sonarqube_token(project_key):
+    print(f"Generating token for project {project_key}")
+
+    token_name = f"token_{project_key}"
+
+    url_list = f"{SONAR_URL}/api/user_tokens/search"
+    response_list = requests.get(url_list, auth=(SONAR_LOGIN, SONAR_PASSWORD))
+
+    if response_list.status_code == 200:
+        existing_tokens = response_list.json().get("userTokens", [])
+
+        for token in existing_tokens:
+            if token["name"] == token_name:
+                print(f"Token '{token_name}' já existe. Excluindo o token antigo...")
+
+                url_revoke = f"{SONAR_URL}/api/user_tokens/revoke"
+                data_revoke = {"name": token_name}
+                response_revoke = requests.post(
+                    url_revoke, data=data_revoke, auth=(SONAR_LOGIN, SONAR_PASSWORD)
+                )
+
+                if response_revoke.status_code == 204:
+                    print(f"Token '{token_name}' excluído com sucesso.")
+                else:
+                    print(f"Falha ao excluir o token: {response_revoke.text}")
+                    return None
+
+        url_generate = f"{SONAR_URL}/api/user_tokens/generate"
+        data = {"name": token_name, "login": SONAR_LOGIN}
+        response_generate = requests.post(
+            url_generate, data=data, auth=(SONAR_LOGIN, SONAR_PASSWORD)
+        )
+
+        if response_generate.status_code == 200:
+            token = response_generate.json().get("token")
+            print(f"Token generated: {token}")
+            return token
+        else:
+            print(f"Failed to generate token: {response_generate.text}")
+            return None
+    else:
+        print(f"Failed to retrieve existing tokens: {response_list.text}")
+        return None
 
 
 # Create a runner for sonnar-scanner in dotnet
@@ -228,39 +368,84 @@ def is_dotnet_project(project_path):
     )
 
 
-# create the function to run the Git part (create SonarQube project, clone, checkout, run sonar-scanner, delete repository)
+def wait_for_sonar_completion(sample_name, token):
+    status = ""
+    while status != "SUCCESS":
+        print("Aguardando SonarQube processar a análise...")
+
+        time.sleep(10)
+        response = requests.get(
+            f"{SONAR_URL}/api/ce/task?componentKey={sample_name}",
+            auth=(SONAR_LOGIN, token),
+        )
+        status = response.json().get("task", {}).get("status")
+        print(f"Status: {status}")
+
+
+def analyze_commits(sample_name, token):
+    print(f"Analyzing commits for {sample_name}")
+
+    commits = run_shell_command("git rev-list --all --reverse").splitlines()
+    count = 0
+    num_commits = len(commits)
+    print("Number of commits:", num_commits)
+
+    with open(COMMITS_REPORT_FILE, mode="w", newline="") as file:
+        writer = csv.writer(file)
+        writer.writerow(["Sample", "Commit Hash", "Date", "Analysis Date", "Issues"])
+
+        for commit_hash in commits:
+            try:
+
+                count += 1
+                print(f"Analyzing commit {count}/{num_commits} {commit_hash}...")
+
+                git_checkout(commit_hash)
+
+                commit_date = get_commit_date(commit_hash)
+                print(f"Commit date: {commit_date}")
+
+                run_sonar_scanner(commit_hash, commit_date, sample_name, token)
+
+                # wait_for_sonar_completion(sample_name, token)
+                print("Waiting for SonarQube to process analysis...")
+                time.sleep(15)
+
+                issues_detected = get_issues_detected(sample_name, token)
+                current_date = time.strftime("%Y-%m-%d %H:%M:%S")
+
+                # print([sample_name, commit_hash, commit_date, issues_detected])
+                # print(issues_detected)
+
+                writer.writerow(
+                    [
+                        sample_name,
+                        commit_hash,
+                        commit_date,
+                        current_date,
+                        issues_detected,
+                    ]
+                )
+            except Exception as e:
+                print(f"Erro ao analisar o commit {commit_hash}: {str(e)}")
+
+    main_branch = get_main_branch()
+
+    run_shell_command(f"git checkout {main_branch}")
+
+
 def run_git_part(row):
     sample_name, github_address = row["sample_name"], row["github_address"]
-    create_sonarqube_project(sample_name, lang="C#")
+    create_sonarqube_project(sample_name)
+    token = generate_sonarqube_token(sample_name)
     print(f"Running SonarQube git clone for {sample_name}")
     clone_repository(github_address)
     repository_name = github_address.split("/")[-1].replace(".git", "")
-    # os.chdir(f'{samples_folder}/{repository_name}')
-    current_path = f"{samples_folder}/{repository_name}"
+    os.chdir(f"{samples_folder}/{repository_name}")
+    print(f"cd  {samples_folder}/{repository_name}")
+    create_sonar_scanner_config(sample_name, token)
 
-    # run for all commits in the repository
-    commits_to_checkout = tuple(Repository(current_path).traverse_commits())
-    latest_commit = commits_to_checkout[-1]
-    print(f"Latest commit: {latest_commit.hash}")
-    print(f"Number of commits: {len(commits_to_checkout)}")
-    hashes = [commit.hash for commit in commits_to_checkout]
-    print(f"Commits: {hashes}")
-
-    for commit in commits_to_checkout:
-        os.chdir(f"{samples_folder}/{repository_name}")
-        checkout_commit(commit.hash)
-        is_latest_commit = commit.hash == latest_commit
-        print(f"Running SonarQube for commit: {commit.hash}")
-        # Identify if the commit has a dotnet project to be built
-        if is_dotnet_project(current_path):
-            print("Running SonarQube for dotnet project")
-            run_sonar_scanner_dotnet(sample_name, commit.hash, is_latest_commit)
-        else:
-            print("Running SonarQube for non-dotnet project")
-            create_sonar_scanner_config(sample_name, commit.hash)
-            run_sonar_scanner()
-        os.system("git reset --hard")
-        os.system("git clean -fd")
+    analyze_commits(sample_name, token)
 
     os.chdir(samples_folder)
     print(f"Deleting repository directory: {samples_folder}/{repository_name}")
@@ -336,14 +521,15 @@ def run_sonarqube_snippets_part():
 
 # create the main function to run the Git part and SonarQube part
 def main():
+    print("start at", time.strftime("%Y-%m-%d %H:%M:%S"))
     # Get the number of CPU cores available
     num_cores = os.cpu_count()
     print(f"Number of cores: {num_cores}")
     with Pool(processes=num_cores) as pool:
         pool.map(run_git_part, [row for _, row in samples_df.iterrows()])
-
     # run_sonarqube_issues_part()
     # run_sonarqube_snippets_part()
+    print("end at", time.strftime("%Y-%m-%d %H:%M:%S"))
 
 
 if __name__ == "__main__":
