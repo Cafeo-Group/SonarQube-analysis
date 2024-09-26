@@ -1,7 +1,4 @@
-import glob
 from multiprocessing import Pool
-from os import makedirs
-
 import pandas as pd
 import requests
 import os
@@ -170,55 +167,6 @@ def delete_repository(repository_name):
     os.system(f"rm -rf {repository_name}")
 
 
-def extract_issues(sample_name):
-    os.makedirs("data/issues", exist_ok=True)
-
-    url = f"http://localhost:9000/api/issues/search?componentKeys={sample_name}&ps=500"
-    response = requests.get(url, auth=("admin", "root"))
-    total_issues = int(response.json().get("total", 0))
-
-    if total_issues <= 500:
-        print(f"Total issues: {total_issues}")
-        print(f"Extracting issues for single page")
-        current_issues = response.json().get("issues", [])
-        current_df = pd.DataFrame(current_issues)
-        current_df.to_csv(f"data/issues/{sample_name}_issues.csv")
-    elif 500 <= total_issues <= 10000:
-        total_pages = (total_issues // 500) + 1
-        for page in range(1, total_pages + 1):
-            print(f"Extracting issues for page {page}")
-            paged_url = url + f"&p={page}"
-            response = requests.get(paged_url, auth=("admin", "root"))
-            issues = response.json().get("issues", [])
-            issues_df = pd.DataFrame(issues)
-            issues_df.to_csv(f"data/issues/{sample_name}_{page}_issues.csv")
-    else:
-        impact_software_qualities = ("MAINTAINABILITY", "RELIABILITY", "SECURITY")
-        for quality in impact_software_qualities:
-            quality_url = f"{url}&impactSoftwareQualities={quality}"
-            response = requests.get(quality_url, auth=("admin", "root"))
-            total_quality_issues = int(response.json().get("total", 0))
-            if total_quality_issues <= 500:
-                print(f"Total issues for {quality}: {total_quality_issues}")
-                print(f"Extracting issues for single page")
-                current_issues = response.json().get("issues", [])
-                current_df = pd.DataFrame(current_issues)
-                current_df.to_csv(f"data/issues/{sample_name}_{quality}_issues.csv")
-            elif 500 <= total_quality_issues <= 10000:
-                total_pages = (total_issues // 500) + 1
-                for page in range(1, total_pages + 1):
-                    print(f"Extracting {quality} issues for page {page}")
-                    paged_url = quality_url + f"&p={page}"
-                    response = requests.get(paged_url, auth=("admin", "root"))
-                    issues = response.json().get("issues", [])
-                    issues_df = pd.DataFrame(issues)
-                    issues_df.to_csv(
-                        f"data/issues/{sample_name}_{quality}_{page}_issues.csv"
-                    )
-            else:
-                print(f"Total issues for {quality} is greater than 10000")
-
-
 def analyze_commits(sample_name, token):
     print(f"Analyzing commits for {sample_name}")
 
@@ -279,58 +227,6 @@ def run_git_part(row):
     os.chdir(samples_folder)
     print(f"Deleting repository directory: {samples_folder}/{repository_name}")
     delete_repository(f"{samples_folder}/{repository_name}")
-
-
-def run_sonarqube_issues_part():
-    for index, row in samples_df.iterrows():
-        sample_name = row["sample_name"]
-        print(f"Extracting issues for {sample_name}")
-        extract_issues(sample_name)
-
-    issues_list = []
-    for file_path in glob.glob("data/issues/*_issues.csv"):
-        if os.path.exists(file_path):
-            issues_list.append(pd.read_csv(file_path))
-        else:
-            print(f"File not found: {file_path}")
-
-    if issues_list:
-        issues_df = pd.concat(issues_list, ignore_index=True)
-        issues_df.drop_duplicates(subset="key", inplace=True)
-        issues_df.to_csv("data/issues/0all.csv", index=False)
-    else:
-        print("No issues files to merge.")
-
-
-def run_sonarqube_snippets_part():
-
-    issues_df = pd.read_csv("data/issues/0all_nondup.csv")
-
-    num_threads = 124
-    print(f"Number of threads: {num_threads}")
-
-    #
-
-    print("Merging all code snippets into one csv file")
-    snippets_list = []
-
-    for issue_key in issues_df["key"]:
-        try:
-            snippets_df = pd.read_csv(
-                f"data/code_snippets/{issue_key}_code_snippets.csv"
-            )
-            snippets_list.append(snippets_df)
-        except Exception as e:
-            print(f"Error processing {issue_key}: {e}")
-            continue
-
-    if snippets_list:
-        merged_snippets_df = pd.concat(snippets_list, ignore_index=True)
-        merged_snippets_df.to_csv(
-            "data/code_snippets/0all_code_snippets.csv", index=False
-        )
-    else:
-        print("No code snippets to merge.")
 
 
 def main():
