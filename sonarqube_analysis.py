@@ -1,6 +1,5 @@
 import glob
 from multiprocessing import Pool
-from concurrent.futures import ThreadPoolExecutor
 from os import makedirs
 
 import pandas as pd
@@ -9,7 +8,6 @@ import os
 import subprocess
 import time
 import csv
-import json
 from requests.exceptions import JSONDecodeError
 
 
@@ -26,25 +24,8 @@ samples_df = pd.read_csv(
     names=["sample_name", "github_address"],
 )
 
-print(samples_df.columns)
-
 script_dir = os.path.dirname(os.path.abspath(__file__))
 samples_folder = os.path.join(script_dir, "samples")
-
-data_folder_path = os.path.join(
-    os.path.expanduser("~"),
-    "Documents",
-    "Mestrado",
-    "2s2024",
-    "Paper JSS",
-    "SonarQube-analysis",
-    "data",
-)
-
-
-def get_sample():
-    for index, row in samples_df.iterrows():
-        yield row["sample_name"], row["github_address"]
 
 
 def run_shell_command(command):
@@ -185,35 +166,6 @@ def generate_sonarqube_token(project_key):
         return None
 
 
-def run_sonar_scanner_dotnet(sample_name, commit_hash, is_latest_commit=False):
-    subprocess.run(
-        f'dotnet-sonarscanner begin /k:"{sample_name}" /d:sonar.host.url="http://localhost:9000" /d:sonar.login="sqa_8b5b36d0d8f38e528b7e7535a2708229f50fbc21" /v:"{commit_hash}"',
-        shell=True,
-        check=False,
-    )
-    result = subprocess.run(
-        "dotnet build", shell=True, check=False, capture_output=True, text=True
-    )
-    if result.returncode != 0:
-        failed_df = pd.DataFrame()
-        failed_df["sample"] = [sample_name]
-        failed_df["commit"] = [commit_hash]
-        failed_df["latest_commit"] = [is_latest_commit]
-        makedirs(f"{data_folder_path}/failed_builds", exist_ok=True)
-        failed_df.to_csv(
-            f"{data_folder_path}/failed_builds/{sample_name}_{commit_hash}failed_builds.csv",
-            mode="a",
-            header=False,
-            index=False,
-        )
-        print(f"Failed to build {sample_name} at commit {commit_hash}")
-    subprocess.run(
-        'dotnet-sonarscanner end /d:sonar.login="sqa_8b5b36d0d8f38e528b7e7535a2708229f50fbc21"',
-        shell=True,
-        check=False,
-    )
-
-
 def delete_repository(repository_name):
     os.system(f"rm -rf {repository_name}")
 
@@ -267,64 +219,6 @@ def extract_issues(sample_name):
                 print(f"Total issues for {quality} is greater than 10000")
 
 
-def extract_code_snippets(issue_key, sample_name):
-    os.makedirs("data/code_snippets", exist_ok=True)
-
-    url = f"http://localhost:9000/api/sources/issue_snippets?issueKey={issue_key}"
-    response = requests.get(url, auth=("admin", "root"))
-
-    regex = f"{sample_name}"
-    snippets = response.json().get(regex, [])
-
-    if not snippets:
-        return
-
-    sources = snippets["sources"]
-    component_key = snippets["component"]["key"]
-    component_project = snippets["component"]["project"]
-    print(f"Component key: {component_key}")
-
-    sources_df = pd.DataFrame(sources)
-
-    sources_df["component_key"] = component_key
-
-    sources_df["component_project"] = component_project
-
-    sources_df.to_csv(f"data/code_snippets/{issue_key}_code_snippets.csv")
-
-
-def extract_code_snippets_parallel(row):
-    issue_k = row.key
-    sample = row.component
-    print(f"Extracting code snippets for {issue_k}")
-    extract_code_snippets(issue_k, sample)
-
-
-def divide_chunks(df, n):
-    for i in range(0, len(df), n):
-        yield df[i : i + n]
-
-
-def is_dotnet_project(project_path):
-    return any(glob.glob(os.path.join(project_path, "*.csproj"))) or any(
-        glob.glob(os.path.join(project_path, "*.sln"))
-    )
-
-
-def wait_for_sonar_completion(sample_name, token):
-    status = ""
-    while status != "SUCCESS":
-        print("Aguardando SonarQube processar a análise...")
-
-        time.sleep(10)
-        response = requests.get(
-            f"{SONAR_URL}/api/ce/task?componentKey={sample_name}",
-            auth=(SONAR_LOGIN, token),
-        )
-        status = response.json().get("task", {}).get("status")
-        print(f"Status: {status}")
-
-
 def analyze_commits(sample_name, token):
     print(f"Analyzing commits for {sample_name}")
 
@@ -340,10 +234,10 @@ def analyze_commits(sample_name, token):
         for commit_hash in commits:
             try:
 
+                git_checkout(commit_hash)
+
                 count += 1
                 print(f"Analyzing commit {count}/{num_commits} {commit_hash}...")
-
-                git_checkout(commit_hash)
 
                 commit_date = get_commit_date(commit_hash)
                 print(f"Commit date: {commit_date}")
@@ -367,10 +261,6 @@ def analyze_commits(sample_name, token):
                 )
             except Exception as e:
                 print(f"Erro ao analisar o commit {commit_hash}: {str(e)}")
-
-    main_branch = get_main_branch()
-
-    run_shell_command(f"git checkout {main_branch}")
 
 
 def run_git_part(row):
