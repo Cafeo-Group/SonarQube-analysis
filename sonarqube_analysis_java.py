@@ -9,9 +9,9 @@ from requests.exceptions import JSONDecodeError
 import glob
 
 
-SONAR_URL = "http://172.23.160.1:9000"
-SONAR_LOGIN = "admin"
-SONAR_PASSWORD = "sonarsenha"
+SONAR_URL = ""
+SONAR_LOGIN = ""
+SONAR_PASSWORD = ""
 COMMITS_REPORT_FILE = "../../results/commits_report_java.csv"
 
 
@@ -447,7 +447,7 @@ def run_git_part(row):
 def main():
     start_time = time.time()
     print("start at", time.strftime("%Y-%m-%d %H:%M:%S"))
-    num_cores = os.cpu_count() - 4
+    num_cores = os.cpu_count()
     print(f"Number of cores: {num_cores}")
     with Pool(processes=num_cores) as pool:
         pool.map(run_git_part, [row for _, row in samples_df.iterrows()])

@@ -1,16 +1,27 @@
 import pandas as pd
 import ast
+import numpy as np
 
-df = pd.read_csv("commits_report.csv", on_bad_lines="skip")
 
-df["Issues"] = df["Issues"].apply(ast.literal_eval)
+def safe_literal_eval(val):
+    if pd.isna(val):
+        return np.nan
+    try:
+        return ast.literal_eval(val)
+    except (ValueError, SyntaxError):
+        return np.nan
+
+
+df = pd.read_csv("results3/commits_report.csv", on_bad_lines="skip")
+
+df["Issues"] = df["Issues"].apply(safe_literal_eval)
 dict_ = {}
 
 
 df_final = pd.DataFrame()
 dict_ = {}
 for index, row in df.iterrows():
-    if row["Issues"]["total"] == 0:
+    if pd.isna(row["Issues"]) or row["Issues"]["total"] == 0:
         continue
     for issue in row["Issues"]["issues"]:
         if issue["key"] in dict_:
@@ -18,15 +29,22 @@ for index, row in df.iterrows():
                 issue["issueStatus"] == "FIXED"
                 and dict_[issue["key"]]["closed_date"] == ""
             ):
+                # print(issue)
                 dict_[issue["key"]]["closed_date"] = row["Date"]
                 dict_[issue["key"]]["closed_hash"] = row["Commit Hash"]
                 dict_[issue["key"]]["fix_duration"] = (
                     pd.to_datetime(row["Date"])
                     - pd.to_datetime(dict_[issue["key"]]["open_date"])
                 ).days
+                dict_[issue["key"]]["author_close"] = issue["author"]
             elif issue["issueStatus"] == "OPEN":
                 dict_[issue["key"]]["latest_open"] = row["Date"]
                 dict_[issue["key"]]["latest_open_hash"] = row["Commit Hash"]
+                dict_[issue["key"]]["author_latest_open"] = issue["author"]
+
+            else:
+                print("Issue status not handled")
+                # print(issue)
         else:
 
             # presume q a primeira aparicao a issue estara aberta
@@ -47,7 +65,9 @@ for index, row in df.iterrows():
                 "message": issue["message"],
                 "effort": issue["effort"],
                 "debt": issue["debt"],
-                "author": issue["author"],
+                "author_open": issue["author"],
+                "author_latest_open": "",
+                "author_close": "",
                 "tags": issue["tags"],
                 "transitions": issue["transitions"],
                 "actions": issue["actions"],
@@ -57,17 +77,26 @@ for index, row in df.iterrows():
                 "quick_fix_available": issue["quickFixAvailable"],
                 "clean_code_attribute": issue["cleanCodeAttribute"],
                 "clean_code_attributeCategory": issue["cleanCodeAttributeCategory"],
+                "text_line_start": None,
+                "text_line_end": None,
+                "text_start_offset": None,
+                "text_end_offset": None,
+                "component": issue["component"],
             }
 
             if "textRange" in issue:
-                text_line_start = issue["textRange"].get("startLine", None)
-                text_line_end = issue["textRange"].get("endLine", None)
-                text_start_offset = issue["textRange"].get("startOffset", None)
-                text_end_offset = issue["textRange"].get("endOffset", None)
-            else:
-                text_line_start = text_line_end = text_start_offset = (
-                    text_end_offset
-                ) = None
+                dict_[issue["key"]]["text_line_start"] = issue["textRange"].get(
+                    "startLine", None
+                )
+                dict_[issue["key"]]["text_line_end"] = issue["textRange"].get(
+                    "endLine", None
+                )
+                dict_[issue["key"]]["text_start_offset"] = issue["textRange"].get(
+                    "startOffset", None
+                )
+                dict_[issue["key"]]["text_end_offset"] = issue["textRange"].get(
+                    "endOffset", None
+                )
 
     if len(dict_):
         df_final = (
@@ -107,33 +136,37 @@ df_final["next_commit_date"] = df_final.apply(
 
 
 def get_next_commit_info(row, df):
-    if row["latest_open_hash"] == "":
-        return "", "", ""
-
-    try:
-        current_index = df[
-            (df["Commit Hash"] == row["latest_open_hash"])
-            & (df["Sample"] == row["sample"])
-        ].index[0]
-    except IndexError:
-        return "", "", ""
-
+    current_index = row.name
     if current_index + 1 < len(df):
-        next_commit_hash = df.iloc[current_index + 1]["Commit Hash"]
-        next_commit_date = df.iloc[current_index + 1]["Date"]
+        if df.iloc[current_index + 1]["Issues"]["issues"]:
+            if df.iloc[current_index + 1]["Issues"]["issues"][0]:
+                # print(df.iloc[current_index + 1]["Issues"]["issues"][0]["author"])
+                author_next_commit = df.iloc[current_index + 1]["Issues"]["issues"][0][
+                    "author"
+                ]
+            else:
+                author_next_commit = ""
+        else:
+            author_next_commit = ""
+        next_commit_date = df.iloc[current_index + 1][
+            "Date"
+        next_commit_hash = df.iloc[current_index + 1][
+            "Commit Hash"
+        ] 
         fix_duration = (
             pd.to_datetime(next_commit_date) - pd.to_datetime(row["open_date"])
         ).days
         if fix_duration < 0:
-            return "", "", ""
-        return next_commit_hash, next_commit_date, fix_duration
+            return "", "", "", ""
+        return next_commit_hash, next_commit_date, fix_duration, author_next_commit
+    return "", "", "", ""
 
-    return "", "", ""
 
+(
+    df_final["next_commit_hash"],
+    df_final["next_commit_date"],
+    df_final["fix_duration"],
+    df_final["author_next_commit"],
+) = zip(*df_final.apply(lambda row: get_next_commit_info(row, df), axis=1))
 
-df_final["next_commit_hash"], df_final["next_commit_date"], df_final["fix_duration"] = (
-    zip(*df_final.apply(lambda row: get_next_commit_info(row, df), axis=1))
-)
-
-print(df_final)
-df_final.to_csv("commits_report_analysis.csv", index=False)
+df_final.to_csv("results/commits_report_analysis_resto.csv", index=False)

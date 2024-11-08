@@ -11,14 +11,17 @@ from requests.exceptions import JSONDecodeError
 SONAR_URL = ""
 SONAR_LOGIN = ""
 SONAR_PASSWORD = ""
-COMMITS_REPORT_FILE = "../../commits_report.csv"
+COMMITS_REPORT_FILE = "../../results/commits_report_10.csv"
 
 
 samples_df = pd.read_csv(
-    "samples.csv",
+    "csv/samplesTest10.csv",
     delimiter=";",
     header=None,
-    names=["sample_name", "github_address"],
+    names=[
+        "sample_name",
+        "github_address",
+    ],
 )
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -79,26 +82,140 @@ def git_checkout(commit_hash):
     return True
 
 
+def find_file(directory, file_name):
+    for root, dirs, files in os.walk(directory):
+        if file_name in files:
+            return root
+    return None
+
+
 def create_sonar_scanner_config(sample_name, token):
     print(f"Creating sonar-scanner configuration file for {sample_name}")
     with open("sonar-project.properties", "w") as f:
         f.write(
-            f"sonar.projectKey={sample_name}\nsonar.sources=.\nsonar.host.url={SONAR_URL}\nsonar.token={token}"
+            f"sonar.projectKey={sample_name}\n"
+            f"sonar.sources=.\n"
+            f"sonar.host.url={SONAR_URL}\n"
+            f"sonar.token={token}\n"
         )
 
 
+def ensure_sonar_plugin_in_gradle_groovy():
+    """Verifica e adiciona o plugin SonarQube ao build.gradle, se necessário"""
+    gradle_groovy_file = "build.gradle"
+    with open(gradle_groovy_file, "r") as file:
+        content = file.read()
+
+    sonar_plugin = 'id "org.sonarqube" version'
+
+    # Verifica se o plugin já está no build.gradle
+    if sonar_plugin not in content:
+        print("Adicionando o plugin SonarQube ao build.gradle...")
+        with open(gradle_groovy_file, "a") as file:
+            file.write('\nplugins {\n    id "org.sonarqube" version "5.1.0.4882"\n}\n')
+        print("Plugin SonarQube adicionado.")
+    else:
+        print("Plugin SonarQube já está presente no build.gradle.")
+
+
+def ensure_sonar_plugin_in_gradle_kotlin():
+    """Verifica e adiciona o plugin SonarQube ao build.gradle, se necessário"""
+    gradle_kotlin_file = "build.gradle.kts"
+    with open(gradle_kotlin_file, "r") as file:
+        content = file.read()
+
+    sonar_plugin = 'id("org.sonarqube") version'
+
+    # Verifica se o plugin já está no build.gradle.kts
+    if sonar_plugin not in content:
+        print("Adicionando o plugin SonarQube ao build.gradle.kts...")
+        with open(gradle_kotlin_file, "a") as file:
+            file.write('\nplugins {\n    id("org.sonarqube") version "5.1.0.4882"\n}\n')
+        print("Plugin SonarQube adicionado.")
+    else:
+        print("Plugin SonarQube já está presente no build.gradle.kts.")
+
+
+def ensure_sonar_plugin_in_maven():
+    """Verifica e adiciona a configuração do SonarQube ao pom.xml, se necessário"""
+    maven_file = "pom.xml"
+    sonar_plugin_config = """
+    <plugin>
+        <groupId>org.sonarsource.scanner.maven</groupId>
+        <artifactId>sonar-maven-plugin</artifactId>
+        <version>3.9.0.2155</version>
+    </plugin>
+    """
+
+    with open(maven_file, "r") as file:
+        content = file.read()
+
+    # Verifica se a configuração do plugin já está no pom.xml
+    if sonar_plugin_config.strip() not in content:
+        print("Adicionando a configuração do plugin SonarQube ao pom.xml...")
+        # Localiza a seção de plugins do Maven e insere a configuração
+        content = content.replace(
+            "<plugins>", "<plugins>\n        " + sonar_plugin_config.strip() + "\n"
+        )
+        with open(maven_file, "w") as file:
+            file.write(content)
+        print("Plugin SonarQube adicionado ao pom.xml.")
+    else:
+        print("Plugin SonarQube já está presente no pom.xml.")
+
+
 def run_sonar_scanner(commit_hash, commit_date, project_key, token):
+
+    # project_root = os.getcwd()
+    # python_file = "requirements.txt"
+    # maven_file = "pom.xml"
+    # gradle_groovy_file = "build.gradle"
+    # gradle_kotlin_file = "build.gradle.kts"
+    # package_file = "package.json"
+
+    result = ""
+
+    # if find_file(project_root, package_file):
+    #     print("SonarScanner for JavaScript")
+    #     result = run_shell_command(
+    #         f"sonar-scanner -Dsonar.projectKey={project_key} "
+    #         f"-Dsonar.sources=. -Dsonar.host.url={SONAR_URL} "
+    #         f"-Dsonar.token={token} "
+    #         f"-Dsonar.projectVersion={commit_hash} "
+    #         f"-Dsonar.projectDate={commit_date}"
+    #     )
+
+    # elif find_file(project_root, python_file):
+    #     print("SonarScanner for Python")
+    #     result = run_shell_command(
+    #         f"pysonar-scanner -Dsonar.projectKey={project_key} "
+    #         f"-Dsonar.sources=. -Dsonar.host.url={SONAR_URL} "
+    #         f"-Dsonar.token={token} "
+    #         f"-Dsonar.projectVersion={commit_hash} "
+    #         f"-Dsonar.projectDate={commit_date}"
+    #     )
+    # else:
+    #     result = run_shell_command(
+    #         f"sonar-scanner -Dsonar.projectKey={project_key} "
+    #         f"-Dsonar.sources=. -Dsonar.host.url={SONAR_URL} "
+    #         f"-Dsonar.token={token} "
+    #         f"-Dsonar.projectVersion={commit_hash} "
+    #         f"-Dsonar.projectDate={commit_date}"
+    #     )
+
+    # if "error" in result.lower():
+    #     print(f"Erro ao executar o sonar-scanner para o commit {commit_hash}")
+    #     print(result)
+
     result = run_shell_command(
-        f"sonar-scanner -Dsonar.projectKey={project_key} "
+        f"pysonar-scanner -Dsonar.projectKey={project_key} "
         f"-Dsonar.sources=. -Dsonar.host.url={SONAR_URL} "
         f"-Dsonar.token={token} "
         f"-Dsonar.projectVersion={commit_hash} "
         f"-Dsonar.projectDate={commit_date}"
     )
 
-    if "error" in result.lower():
-        print(f"Erro ao executar o sonar-scanner para o commit {commit_hash}")
-        print(result)
+    return result
 
 
 def get_issues_detected(project_key, token):
@@ -185,7 +302,9 @@ def analyze_commits(sample_name, token):
                 git_checkout(commit_hash)
 
                 count += 1
-                print(f"Analyzing commit {count}/{num_commits} {commit_hash}...")
+                print(
+                    f"Analyzing commit - {sample_name} - {count}/{num_commits} - {commit_hash}..."
+                )
 
                 commit_date = get_commit_date(commit_hash)
                 print(f"Commit date: {commit_date}")
@@ -230,12 +349,17 @@ def run_git_part(row):
 
 
 def main():
+    start_time = time.time()
     print("start at", time.strftime("%Y-%m-%d %H:%M:%S"))
-    num_cores = os.cpu_count()
+    num_cores = os.cpu_count() - 3
+    # num_cores = 1
     print(f"Number of cores: {num_cores}")
     with Pool(processes=num_cores) as pool:
         pool.map(run_git_part, [row for _, row in samples_df.iterrows()])
+    # for row in samples_df.iterrows():
+    #     run_git_part(row)
     print("end at", time.strftime("%Y-%m-%d %H:%M:%S"))
+    print(f"Total time: {time.time() - start_time}")
 
 
 if __name__ == "__main__":
